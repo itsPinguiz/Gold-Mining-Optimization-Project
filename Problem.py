@@ -14,7 +14,7 @@ class Problem:
             np.random.seed(seed)
             random.seed(seed)
         
-        # 1. Create Random Graph
+        # Create Random Graph
         # We attempt to create a connected graph. 
         # If the random graph is disconnected, we force connections.
         connected = False
@@ -33,7 +33,7 @@ class Problem:
                     self.graph[u][v]['dist'] = np.random.random() * 10
                 connected = True
 
-        # 2. Assign Weights (Distance) and Gold
+        # Assign Weights (Distance) and Gold
         # Note: 'dist' is assigned here for existing edges
         for u, v in self.graph.edges():
             if 'dist' not in self.graph[u][v]:
@@ -50,11 +50,11 @@ class Problem:
         Validates the path and calculates the total cost.
         Returns: (Total Cost, Status String)
         """
-        # 1. Check Format
+        # Check Format
         if not path or path[0] != 0 or path[-1] != 0:
             return float('inf'), "Invalid: Must start and end at Depot (0)"
         
-        # 2. Check all cities visited
+        # Check all cities visited
         visited = set(path)
         all_cities = set(range(self.n))
         if visited != all_cities:
@@ -63,7 +63,7 @@ class Problem:
         current_gold = 0
         total_cost = 0
         
-        # 3. Simulate Path
+        # Simulate Path
         for i in range(len(path) - 1):
             u, v = path[i], path[i+1]
             

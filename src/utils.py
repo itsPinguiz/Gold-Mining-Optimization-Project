@@ -78,18 +78,20 @@ def run_tests(solution_func, test_cases=None):
         test_cases: Optional list of (n, density, alpha, beta) tuples. 
                    If None, uses default test cases.
     """
-    logger, log_file = setup_logger()
-    
-    if test_cases is None:
-        test_cases = [
-            # N=100
-            (100, 0.2, 1, 1), (100, 0.2, 2, 1), (100, 0.2, 1, 2),
-            (100, 1, 1, 1),   (100, 1, 2, 1),   (100, 1, 1, 2),
-            
-            # N=1000
-            (1000, 0.2, 1, 1), (1000, 0.2, 2, 1), (1000, 0.2, 1, 2),
-            (1000, 1, 1, 1),   (1000, 1, 2, 1),   (1000, 1, 1, 2)
-        ]
+    test_cases = [
+        # N=100
+        (100, 0.2, 1, 1), (100, 0.2, 2, 1), (100, 0.2, 1, 2),
+        (100, 1, 1, 1),   (100, 1, 2, 1),   (100, 1, 1, 2),
+        
+        # N=1000
+        (1000, 0.2, 1, 1), (1000, 0.2, 2, 1), (1000, 0.2, 1, 2),
+        (1000, 1, 1, 1),   (1000, 1, 2, 1),   (1000, 1, 1, 2),
+
+        # Edge Cases
+        # alpha or beta = 0
+        (100, 0.2, 0, 1), (100, 0.2, 1, 0),
+        (1000, 1, 0, 1), (1000, 1, 1, 0)   
+    ]
     
     logger.info(f"Test Run Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Log file: {log_file}")
@@ -103,7 +105,6 @@ def run_tests(solution_func, test_cases=None):
     
     for n, dens, alpha, beta in test_cases:
         # Create a specific problem instance
-        # Note: We use a fixed seed (42) here for reproducibility during testing
         p = Problem(n, density=dens, alpha=alpha, beta=beta, seed=42)
         
         start = time.time()

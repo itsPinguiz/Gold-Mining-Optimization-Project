@@ -4,9 +4,12 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import shortest_path
 
-# ------------------------------------------------------------------------------
-# 1. HELPER: SPLIT PROCEDURE
-# ------------------------------------------------------------------------------
+# PARAMETERS
+POP_SIZE=30
+GENERATIONS=100
+MAX_LOAD=None
+
+# HELPER: SPLIT PROCEDURE
 def split_procedure(permutation, problem_data):
     """
     Decodes a TSP permutation into a VRP solution using O(1) Matrix lookups.
@@ -34,15 +37,15 @@ def split_procedure(permutation, problem_data):
         for j in range(i, min(n, i + MAX_TRIP_LENGTH)):
             v = permutation[j]
             
-            # 1. TRAVEL u -> v
+            # TRAVEL u -> v
             d_uv = dist_matrix[u][v]
             step_cost = d_uv + (d_uv * current_gold * alpha) ** beta
             trip_cost += step_cost
             
-            # 2. PICK UP GOLD
+            # PICK UP GOLD
             current_gold += golds[v]
             
-            # 3. RETURN COST v -> 0
+            # RETURN COST v -> 0
             d_v0 = dist_matrix[v][0]
             return_cost = d_v0 + (d_v0 * current_gold * alpha) ** beta
             
@@ -65,10 +68,11 @@ def split_procedure(permutation, problem_data):
     
     return virtual_path, V[n]
 
-# ------------------------------------------------------------------------------
-# 2. HELPER: GENETIC OPERATORS
-# ------------------------------------------------------------------------------
+# HELPER: GENETIC OPERATORS
 def inver_over_crossover(p1, p2):
+    """
+    Inver-over crossover operator for TSP permutations.
+    """
     current = p1[:]
     if len(current) < 2: return current
     c = random.choice(current)
@@ -97,7 +101,11 @@ def inver_over_crossover(p1, p2):
         
     return current
 
+# HELPER: INITIALIZATION 
 def greedy_initialization(dist_matrix, cities):
+    """
+    Creates a greedy TSP path as an initial genotype.
+    """
     unvisited = set(cities)
     current = 0 
     path = []
@@ -124,29 +132,79 @@ def greedy_initialization(dist_matrix, cities):
         
     return path
 
-# ------------------------------------------------------------------------------
-# 3. MAIN ALGORITHM FUNCTION
-# ------------------------------------------------------------------------------
+# HELPER: PROBLEM EXPANSION
+def expand_problem_data(dist_matrix, golds, max_load=None):
+    """
+    Splits cities ONLY if they are extreme outliers.
+    """
+    new_golds = []
+    original_indices = []
+    
+    # If max_load is not manually set, we calculate it dynamically.
+    if max_load is None:
+        # We only split a city if it's in the top 10% of heaviness
+        # OR if it's huge relative to the average.
+        avg_gold = np.mean(golds[1:]) # Ignore depot
+        max_gold_in_graph = np.max(golds)
+        
+        # Heuristic: Only split if a city is > 150% of the average
+        # This prevents exploding the graph size with unnecessary splits
+        threshold = max(max_gold_in_graph * 0.8, avg_gold * 1.5)
+    else:
+        threshold = max_load
+
+    # Create Virtual Cities
+    for i, amount in enumerate(golds):
+        # Never split depot (0) or "normal" sized cities (<= threshold)
+        if i == 0 or amount <= threshold:
+            new_golds.append(amount)
+            original_indices.append(i)
+        else:
+            # We don't want 10 tiny chunks. We want 2 or 3 manageable chunks.
+            # We target a chunk size roughly equal to the threshold.
+            num_chunks = int(np.ceil(amount / threshold))
+            chunk_gold = amount / num_chunks
+            
+            for _ in range(num_chunks):
+                new_golds.append(chunk_gold)
+                original_indices.append(i)
+                
+    new_n = len(new_golds)
+    new_golds = np.array(new_golds)
+    
+    # Rebuild Distance Matrix
+    new_dist_matrix = np.zeros((new_n, new_n))
+    for i in range(new_n):
+        for j in range(new_n):
+            u_old = original_indices[i]
+            v_old = original_indices[j]
+            new_dist_matrix[i][j] = dist_matrix[u_old][v_old]
+            
+    return new_dist_matrix, new_golds, original_indices
+
+# MAIN ALGORITHM
 def my_genetic_algorithm(problem_instance):
     """
     The main optimization pipeline.
     """
-    # 1. SciPy Pre-computation
+    # PRE-COMPUTATION & VIRTUAL SPLITTING
     graph_sparse = nx.to_scipy_sparse_array(problem_instance.graph, weight='dist')
-    dist_matrix = shortest_path(graph_sparse, method='auto', directed=False, unweighted=False)
-    golds = np.array([problem_instance.graph.nodes[i]['gold'] for i in range(problem_instance.n)])
+    raw_dist_matrix = shortest_path(graph_sparse, method='auto', directed=False)
+    raw_golds = np.array([problem_instance.graph.nodes[i]['gold'] for i in range(problem_instance.n)])
+    
+    # Call the helper function
+    dist_matrix, golds, id_map = expand_problem_data(raw_dist_matrix, raw_golds, MAX_LOAD)
     
     problem_data = {
-        'dist_matrix': dist_matrix,
-        'golds': golds,
+        'dist_matrix': dist_matrix, # Expanded Matrix
+        'golds': golds,             # Expanded Gold
         'alpha': problem_instance.alpha,
         'beta': problem_instance.beta
     }
     
-    # 2. GA Loop
-    POP_SIZE = 30
-    GENERATIONS = 100 
-    cities = list(range(1, problem_instance.n))
+    # GA INITIALIZATION (On Virtual Cities)
+    n_expanded = len(golds)
+    cities = list(range(1, n_expanded)) 
     population = []
     
     # Seeding
@@ -162,6 +220,7 @@ def my_genetic_algorithm(problem_instance):
         
     population.sort(key=lambda x: x['f'])
     
+    # EVOLUTION LOOP
     for gen in range(GENERATIONS):
         p1 = min(random.sample(population, 4), key=lambda x: x['f'])
         p2 = min(random.sample(population, 4), key=lambda x: x['f'])
@@ -178,18 +237,27 @@ def my_genetic_algorithm(problem_instance):
             population[-1] = {'g': child_geno, 'f': fit, 'vp': v_path}
             population.sort(key=lambda x: x['f'])
 
-    # 3. Path Reconstruction (Lazy)
+    # PATH RECONSTRUCTION (Virtual -> Real)
     best_virtual_segments = population[0]['vp']
     final_physical_path = [0]
-    current_node = 0
+    current_real_node = 0
     
     for segment in best_virtual_segments:
-        trip_targets = segment + [0]
-        for target in trip_targets:
-            if target == current_node: continue
+        # Map Virtual IDs back to Real IDs
+        # Add Depot (0) to end of every trip
+        trip_targets_virtual = segment + [0]
+        
+        for target_virtual in trip_targets_virtual:
+            target_real = id_map[target_virtual] # Look up real ID
             
-            path_leg = nx.shortest_path(problem_instance.graph, source=current_node, target=target, weight='dist')
+            if target_real == current_real_node: 
+                continue # Skip 0-distance moves
+            
+            path_leg = nx.shortest_path(problem_instance.graph, 
+                                        source=current_real_node, 
+                                        target=target_real, 
+                                        weight='dist')
             final_physical_path.extend(path_leg[1:])
-            current_node = target
+            current_real_node = target_real
             
     return final_physical_path
